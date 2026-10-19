@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  app:
+    image: ghcr.io/pablokbs/link-shortener:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=production
+      - SHORTENER_DOMAIN=${SHORTENER_DOMAIN}
+      - SHORTENER_SCHEME=${SHORTENER_SCHEME:-https}
+      - DATABASE_URL=${DATABASE_URL}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SESSION_MAX_AGE_SECONDS=${SESSION_MAX_AGE_SECONDS:-604800}
+      - SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-session}
+      - CSRF_COOKIE_NAME=${CSRF_COOKIE_NAME:-csrf}
+      - REDIRECT_STATUS_CODE=${REDIRECT_STATUS_CODE:-302}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - shortener_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=shortener
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=shortener
+    volumes:
+      - shortener_pgdata:/var/lib/postgresql/data
+    networks:
+      - shortener_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shortener -d shortener"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - SHORTENER_DOMAIN=${SHORTENER_DOMAIN}
+    volumes:
+      - shortener_caddy_data:/data
+      - shortener_caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - shortener_internal
+    restart: unless-stopped
+    depends_on:
+      - app
+
+volumes:
+  shortener_pgdata:
+  shortener_caddy_data:
+  shortener_caddy_config:
+
+networks:
+  shortener_internal:
+    driver: bridge
